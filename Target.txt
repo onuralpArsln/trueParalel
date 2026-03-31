@@ -1,0 +1,8 @@
+1- Use Java
+2- Use Playwright
+3- Create a Class with method that uses playwright to go to https://www.trendyol.com/ then makes a search then scrols a bit. Method should get 4 arameters a keyword string to be saeched and 3 int values. after doing the search 3 int indicates the order of products so it grabs te name of x th yth anz zth podcuts listed after search.
+ returns names ends.
+4 - create a driver class that calls playwright class with a keyword selected radnomly from keywords.txt and gives 3 random numbers <20
+5 - create a  controller class that calls X amount instances of driver class in true plaralelism.
+6- this should wok in linux and macos devices
+7- aim to use gpu on macos. 
