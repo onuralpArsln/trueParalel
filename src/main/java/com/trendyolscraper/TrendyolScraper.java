@@ -5,6 +5,7 @@ import com.microsoft.playwright.options.WaitUntilState;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 public class TrendyolScraper {
 
@@ -19,8 +20,22 @@ public class TrendyolScraper {
 
         // Create a new context and page from the shared browser
         try (BrowserContext context = browser.newContext(new Browser.NewContextOptions()
+                    .setUserAgent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36")
                     .setViewportSize(1920, 1080))) {
             
+            // RADICAL MODAL KILLER: Injects a script to remove overlays and modals globally via CSS
+            context.addInitScript("() => {\n" +
+                "  const style = document.createElement('style');\n" +
+                "  style.innerHTML = `\n" +
+                "    .modal-container, .modal-close, #modals, \n" +
+                "    #onetrust-banner-sdk, .popup-container, .overlay {\n" +
+                "      display: none !important; \n" +
+                "      visibility: hidden !important; \n" +
+                "      pointer-events: none !important;\n" +
+                "    }`;\n" +
+                "  document.head.appendChild(style);\n" +
+                "}");
+
             Page page = context.newPage();
 
             // Set a generous timeout
@@ -69,34 +84,41 @@ public class TrendyolScraper {
                 } catch (Exception e) {}
             }
 
-            // Click the search placeholder (use force if needed as modals might still be fading)
-            Locator searchPlaceholder = page.locator(".suggestion-placeholder");
+            // Click the search placeholder (if it exists)
+            Locator searchPlaceholder = page.locator(".suggestion-placeholder, button[data-testid='suggestion-placeholder']");
             if (searchPlaceholder.isVisible()) {
                 try {
-                    searchPlaceholder.click(new Locator.ClickOptions().setForce(true).setTimeout(5000));
-                } catch (Exception e) {
-                    // fall back to direct search input if placeholder click fails
-                }
+                    searchPlaceholder.click(new Locator.ClickOptions().setForce(true).setTimeout(3000));
+                } catch (Exception e) {}
                 page.waitForTimeout(500);
             }
 
-            // Final check for actual search bar
+            // Fill actual search bar
             Locator searchInput = page.locator("input[data-testid='suggestion'], input.search-input");
-            if (!searchInput.isVisible()) {
-                // If it's still not visible, it might be that the placeholder click didn't work.
-                // We'll try to focus it directly.
-                try {
-                    searchInput.focus(new Locator.FocusOptions().setTimeout(2000));
-                } catch (Exception e) {}
+            
+            // SURGICAL INJECTION: Use JavaScript to type if normal fill() fails
+            try {
+                if (searchInput.isVisible()) {
+                    searchInput.fill(keyword);
+                } else {
+                    // Inject directly via JS if hidden/blocked
+                    page.evaluate("({selector, text}) => {\n" +
+                        "  const input = document.querySelector(selector);\n" +
+                        "  if (input) {\n" +
+                        "    input.value = text;\n" +
+                        "    input.dispatchEvent(new Event('input', { bubbles: true }));\n" +
+                        "    input.dispatchEvent(new Event('change', { bubbles: true }));\n" +
+                        "  }\n" +
+                        "}", Map.of("selector", "input[data-testid='suggestion']", "text", keyword));
+                }
+            } catch (Exception e) {
+                 // Final attempt: Focus it first via JS and then type
+                 try {
+                     page.evaluate("selector => document.querySelector(selector)?.focus()", "input[data-testid='suggestion']");
+                     searchInput.fill(keyword);
+                 } catch (Exception e2) {}
             }
 
-            if (!searchInput.isVisible()) {
-                results.add("Error: Still could not see search input for " + keyword + " (possibly blocked by modal)");
-                context.close();
-                return results;
-            }
-
-            searchInput.fill(keyword);
             searchInput.press("Enter");
 
             // Wait for results to load by waiting for product containers
