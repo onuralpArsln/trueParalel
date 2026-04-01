@@ -28,12 +28,19 @@ public class TrendyolScraper {
                 "  const style = document.createElement('style');\n" +
                 "  style.innerHTML = `\n" +
                 "    .modal-container, .modal-close, #modals, \n" +
-                "    #onetrust-banner-sdk, .popup-container, .overlay {\n" +
+                "    #onetrust-banner-sdk, .popup-container, .overlay, .overlay-container {\n" +
                 "      display: none !important; \n" +
                 "      visibility: hidden !important; \n" +
                 "      pointer-events: none !important;\n" +
                 "    }`;\n" +
                 "  document.head.appendChild(style);\n" +
+                "  \n" +
+                "  // Remove them from DOM every second just in case they are re-added\n" +
+                "  setInterval(() => {\n" +
+                "    ['.modal-container', '#modals', '#onetrust-banner-sdk'].forEach(sel => {\n" +
+                "       document.querySelectorAll(sel).forEach(el => el.remove());\n" +
+                "    });\n" +
+                "  }, 1000);\n" +
                 "}");
 
             Page page = context.newPage();
@@ -96,30 +103,30 @@ public class TrendyolScraper {
             // Fill actual search bar
             Locator searchInput = page.locator("input[data-testid='suggestion'], input.search-input");
             
-            // SURGICAL INJECTION: Use JavaScript to type if normal fill() fails
+            // Try to interact naturally first
             try {
-                if (searchInput.isVisible()) {
-                    searchInput.fill(keyword);
-                } else {
-                    // Inject directly via JS if hidden/blocked
-                    page.evaluate("({selector, text}) => {\n" +
-                        "  const input = document.querySelector(selector);\n" +
-                        "  if (input) {\n" +
-                        "    input.value = text;\n" +
-                        "    input.dispatchEvent(new Event('input', { bubbles: true }));\n" +
-                        "    input.dispatchEvent(new Event('change', { bubbles: true }));\n" +
-                        "  }\n" +
-                        "}", Map.of("selector", "input[data-testid='suggestion']", "text", keyword));
-                }
+                searchInput.click(new Locator.ClickOptions().setForce(true));
+                // Clear any existing value just in case
+                page.keyboard().press("Control+A");
+                page.keyboard().press("Backspace");
+                // Type with a small delay to simulate a human
+                searchInput.type(keyword, new Locator.TypeOptions().setDelay(50));
             } catch (Exception e) {
-                 // Final attempt: Focus it first via JS and then type
-                 try {
-                     page.evaluate("selector => document.querySelector(selector)?.focus()", "input[data-testid='suggestion']");
-                     searchInput.fill(keyword);
-                 } catch (Exception e2) {}
+                // Fallback to direct focus and type
+                page.evaluate("selector => document.querySelector(selector)?.focus()", "input[data-testid='suggestion']");
+                page.keyboard().type(keyword);
             }
 
+            // Press enter and wait for navigation or a change in URL
             searchInput.press("Enter");
+            
+            try {
+                // Wait for search result page to load (URL changes to include /sr?q=)
+                page.waitForURL("**/sr?q=**", new Page.WaitForURLOptions().setTimeout(10000));
+            } catch (Exception e) {
+                // If URL redirect didn't happen, maybe it's an AJAX load
+                page.waitForTimeout(2000);
+            }
 
             // Wait for results to load by waiting for product containers
             try {
