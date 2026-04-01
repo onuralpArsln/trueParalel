@@ -1,0 +1,10 @@
+bilgisayar
+telefon
+kulaklık
+ayakkabı
+çanta
+saat
+kitap
+tişört
+parfüm
+gözlük
