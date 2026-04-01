@@ -12,6 +12,7 @@ import com.microsoft.playwright.Browser;
 
 public class ScraperDriver implements Runnable {
 
+    private static final Object contextLock = new Object();
     private final int workerId;
     private final String mode;
     private final boolean gpuEnabled;
@@ -60,14 +61,11 @@ public class ScraperDriver implements Runnable {
 
         System.out.println("[Worker " + workerId + "] Keyword: '" + keyword + "', fetching items at rank: " + x + ", " + y + ", " + z);
 
-        TrendyolScraper scraper = new TrendyolScraper(mode, gpuEnabled, browser);
-
-        if (Thread.currentThread().isInterrupted()) {
-            System.out.println("[Worker " + workerId + "] Interrupted before scraping.");
-            return;
+        List<String> results;
+        synchronized (contextLock) {
+            TrendyolScraper scraper = new TrendyolScraper(mode, gpuEnabled, browser);
+            results = scraper.searchAndExtract(keyword, x, y, z, workerId);
         }
-
-        List<String> results = scraper.searchAndExtract(keyword, x, y, z, workerId);
 
         if (Thread.currentThread().isInterrupted()) {
             System.out.println("[Worker " + workerId + "] Interrupted after scraping.");
