@@ -5,11 +5,14 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Scanner;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+
+import com.microsoft.playwright.*;
 
 public class MainController {
 
@@ -41,48 +44,76 @@ public class MainController {
             keywords.add("bilgisayar");
         }
 
-        // Set up the Thread Pool
-        ExecutorService executorService = Executors.newFixedThreadPool(numberOfWorkers);
+        // Set up Playwright and Browser once
+        try (Playwright playwright = Playwright.create()) {
+            BrowserType.LaunchOptions launchOptions = new BrowserType.LaunchOptions()
+                    .setHeadless(mode.equalsIgnoreCase("headless"));
 
-        // Submit the tasks
-        for (int i = 1; i <= numberOfWorkers; i++) {
-            ScraperDriver driver = new ScraperDriver(i, mode, gpuEnabled, keywords);
-            executorService.submit(driver);
-        }
+            // Use stable flags for macOS
+            List<String> argsList = new ArrayList<>();
+            argsList.add("--ignore-certificate-errors");
 
-        // Setup emergency stop background thread
-        Thread emergencyStopListener = new Thread(() -> {
-            Scanner scanner = new Scanner(System.in);
-            System.out.println("\n*** Press 'q' and Enter at any time to trigger an EMERGENCY STOP ***\n");
-            while (scanner.hasNextLine()) {
-                String input = scanner.nextLine();
-                if ("q".equalsIgnoreCase(input.trim())) {
-                    System.out.println("\n[EMERGENCY STOP] 'q' detected. Forcefully shutting down JVM to terminate all Playwright processes immediately...");
-                    System.exit(1); // Hard kill to ensure Playwright browsers die immediately
+            if (!gpuEnabled) {
+                argsList.add("--disable-gpu");
+            }
+            launchOptions.setArgs(argsList);
+
+            System.out.println("Launching Chromium...");
+            try (Browser browser = playwright.chromium().launch(launchOptions)) {
+                
+                // Final stability check - wait for browser connection to settle
+                Thread.sleep(2000); 
+
+                // Set up the Thread Pool
+                ExecutorService executorService = Executors.newFixedThreadPool(numberOfWorkers);
+
+                // Submit the tasks
+                for (int i = 1; i <= numberOfWorkers; i++) {
+                    ScraperDriver driver = new ScraperDriver(i, mode, gpuEnabled, keywords, browser);
+                    executorService.submit(driver);
+                }
+
+                // Setup emergency stop background thread
+                Thread emergencyStopListener = new Thread(() -> {
+                    Scanner scanner = new Scanner(System.in);
+                    System.out.println("\n*** Press 'q' and Enter at any time to trigger an EMERGENCY STOP ***\n");
+                    while (scanner.hasNextLine()) {
+                        String input = scanner.nextLine();
+                        if ("q".equalsIgnoreCase(input.trim())) {
+                            System.out.println("\n[EMERGENCY STOP] 'q' detected. Forcefully shutting down JVM...");
+                            System.exit(1);
+                        }
+                    }
+                });
+                emergencyStopListener.setDaemon(true);
+                emergencyStopListener.start();
+
+                // Shut down the executor gracefully and wait for completion
+                executorService.shutdown();
+                try {
+                    // Wait up to 5 minutes for completion
+                    if (!executorService.awaitTermination(5, TimeUnit.MINUTES)) {
+                        System.out.println("Warning: Timeout reached. Forcing shutdown...");
+                        executorService.shutdownNow();
+                    } else {
+                        System.out.println("All tasks completed successfully.");
+                    }
+                } catch (InterruptedException e) {
+                    System.out.println("Main thread interrupted. Forcing shutdown...");
+                    executorService.shutdownNow();
+                    Thread.currentThread().interrupt();
                 }
             }
-        });
-        emergencyStopListener.setDaemon(true); // Ensures this thread doesn't prevent JVM exit
-        emergencyStopListener.start();
-
-        // Shut down the executor gracefully and wait for completion
-        executorService.shutdown();
-        try {
-            // Wait up to 5 minutes for completion
-            if (!executorService.awaitTermination(5, TimeUnit.MINUTES)) {
-                System.out.println("Warning: Timeout reached. Forcing shutdown...");
-                executorService.shutdownNow();
-            } else {
-                System.out.println("All tasks completed successfully.");
+        } catch (Exception e) {
+            // Check for the known Playwright Java shutdown bug (NegativeArraySizeException)
+            if (!(e instanceof java.lang.NegativeArraySizeException)) {
+                System.err.println("Error in Playwright session: " + e.getMessage());
+                e.printStackTrace();
             }
-        } catch (InterruptedException e) {
-            System.out.println("Main thread interrupted. Forcing shutdown...");
-            executorService.shutdownNow();
-            Thread.currentThread().interrupt();
         }
 
         System.out.println("Controller finished.");
-        System.exit(0); // Ensure Playwright processes are completely released
+        System.exit(0);
     }
 
     private static List<String> loadKeywords() {

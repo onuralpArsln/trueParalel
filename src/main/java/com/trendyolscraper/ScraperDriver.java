@@ -8,6 +8,8 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Random;
 
+import com.microsoft.playwright.Browser;
+
 public class ScraperDriver implements Runnable {
 
     private final int workerId;
@@ -15,13 +17,15 @@ public class ScraperDriver implements Runnable {
     private final boolean gpuEnabled;
     private final List<String> keywords;
     private final Random random;
+    private final Browser browser;
 
-    public ScraperDriver(int workerId, String mode, boolean gpuEnabled, List<String> keywords) {
+    public ScraperDriver(int workerId, String mode, boolean gpuEnabled, List<String> keywords, Browser browser) {
         this.workerId = workerId;
         this.mode = mode;
         this.gpuEnabled = gpuEnabled;
         this.keywords = keywords;
         this.random = new Random();
+        this.browser = browser;
     }
 
     @Override
@@ -31,6 +35,14 @@ public class ScraperDriver implements Runnable {
         }
 
         System.out.println("[Worker " + workerId + "] Starting...");
+
+        // Small delay to prevent race conditions during context creation on macOS
+        try {
+            Thread.sleep(random.nextInt(1000)); 
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return;
+        }
 
         // Pick a random keyword
         String keyword = keywords.isEmpty() ? "bilgisayar" : keywords.get(random.nextInt(keywords.size()));
@@ -48,7 +60,7 @@ public class ScraperDriver implements Runnable {
 
         System.out.println("[Worker " + workerId + "] Keyword: '" + keyword + "', fetching items at rank: " + x + ", " + y + ", " + z);
 
-        TrendyolScraper scraper = new TrendyolScraper(mode, gpuEnabled);
+        TrendyolScraper scraper = new TrendyolScraper(mode, gpuEnabled, browser);
 
         if (Thread.currentThread().isInterrupted()) {
             System.out.println("[Worker " + workerId + "] Interrupted before scraping.");

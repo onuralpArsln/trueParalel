@@ -4,60 +4,23 @@ import com.microsoft.playwright.*;
 import com.microsoft.playwright.options.WaitUntilState;
 
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 
 public class TrendyolScraper {
 
-    private final String mode;
-    private final boolean gpuEnabled;
+    private final Browser browser;
 
-    public TrendyolScraper(String mode, boolean gpuEnabled) {
-        this.mode = mode;
-        this.gpuEnabled = gpuEnabled;
+    public TrendyolScraper(String mode, boolean gpuEnabled, Browser browser) {
+        this.browser = browser;
     }
 
     public List<String> searchAndExtract(String keyword, int x, int y, int z, int workerId) {
         List<String> results = new ArrayList<>();
 
-        try (Playwright playwright = Playwright.create()) {
-            BrowserType.LaunchOptions launchOptions = new BrowserType.LaunchOptions()
-                    .setHeadless(mode.equalsIgnoreCase("headless"));
-
-            if (gpuEnabled) {
-                // To use GPU in headless Chromium, we often need to disable software rasterizer
-                // and pass flags to force hardware acceleration.
-                // If headed, it uses GPU by default if available.
-                launchOptions.setArgs(Arrays.asList(
-                        "--ignore-certificate-errors",
-                        "--use-gl=egl",
-                        "--enable-unsafe-webgpu",
-                        "--enable-features=Vulkan"
-                ));
-            } else {
-                 launchOptions.setArgs(Arrays.asList(
-                        "--disable-gpu"
-                 ));
-            }
-
-            // Create browser instance
-            // We use Chromium as it gives the best standard behavior
-            Browser browser = playwright.chromium().launch(launchOptions);
-
-            // ==========================================
-            // PLACEHOLDER FOR PROXY AND FINGERPRINTING
-            // ==========================================
-            // To add a proxy:
-            // Browser.NewContextOptions contextOptions = new Browser.NewContextOptions()
-            //      .setProxy(new Proxy("http://your-proxy-ip:port").setUsername("usr").setPassword("pwd"))
-            //      .setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) ...")
-            //      .setViewportSize(1920, 1080);
-            // BrowserContext context = browser.newContext(contextOptions);
-            // ==========================================
-
-            BrowserContext context = browser.newContext(new Browser.NewContextOptions()
-                    .setViewportSize(1920, 1080));
-
+        // Create a new context and page from the shared browser
+        try (BrowserContext context = browser.newContext(new Browser.NewContextOptions()
+                    .setViewportSize(1920, 1080))) {
+            
             Page page = context.newPage();
 
             // Set a generous timeout
@@ -66,37 +29,71 @@ public class TrendyolScraper {
             // Navigate to trendyol
             page.navigate("https://www.trendyol.com/");
 
-            // Wait a moment for initial load and popups
-            page.waitForTimeout(2000);
+            // Wait for initial load and popups
+            page.waitForTimeout(4000);
 
-            // Handle Popups
-            // 1. Gender / Country Selection
-            try {
-                Locator closeGenderPopup = page.locator(".modal-close").first();
-                if (closeGenderPopup.count() > 0 && closeGenderPopup.isVisible()) {
-                    closeGenderPopup.click();
-                    page.waitForTimeout(500);
+            // Handle Popups (Retry mechanism for stubborn modals)
+            for (int i = 0; i < 2; i++) {
+                // 1. Gender / Country Selection Modal
+                try {
+                    Locator genderModalClose = page.locator(".modal-close");
+                    if (genderModalClose.isVisible()) {
+                        genderModalClose.click();
+                        page.waitForTimeout(1000);
+                    } else {
+                        // Sometimes the modal-close is hidden, but gender buttons are visible
+                        Locator genderButtons = page.locator(".gender-button");
+                        if (genderButtons.count() > 0 && genderButtons.first().isVisible()) {
+                            genderButtons.first().click();
+                            page.waitForTimeout(1000);
+                        }
+                    }
+                } catch (Exception e) {}
+
+                // 2. Cookie Consent Banner
+                try {
+                    Locator acceptCookies = page.locator("#onetrust-accept-btn-handler");
+                    if (acceptCookies.isVisible()) {
+                        acceptCookies.click();
+                        page.waitForTimeout(500);
+                    }
+                } catch (Exception e) {}
+                
+                // 3. Campaign/Welcome popups
+                try {
+                    Locator campaignClose = page.locator(".campaign-button-close, .popup-close");
+                    if (campaignClose.count() > 0 && campaignClose.first().isVisible()) {
+                        campaignClose.first().click();
+                        page.waitForTimeout(500);
+                    }
+                } catch (Exception e) {}
+            }
+
+            // Click the search placeholder (use force if needed as modals might still be fading)
+            Locator searchPlaceholder = page.locator(".suggestion-placeholder");
+            if (searchPlaceholder.isVisible()) {
+                try {
+                    searchPlaceholder.click(new Locator.ClickOptions().setForce(true).setTimeout(5000));
+                } catch (Exception e) {
+                    // fall back to direct search input if placeholder click fails
                 }
-            } catch (Exception e) {
-                // Ignore if not present
+                page.waitForTimeout(500);
             }
 
-            // 2. Cookie Consent
-            try {
-                 Locator acceptCookies = page.locator("#onetrust-accept-btn-handler");
-                 if (acceptCookies.count() > 0 && acceptCookies.isVisible()) {
-                     acceptCookies.click();
-                     page.waitForTimeout(500);
-                 }
-            } catch (Exception e) {
-                 // Ignore if not present
+            // Final check for actual search bar
+            Locator searchInput = page.locator("input[data-testid='suggestion'], input.search-input");
+            if (!searchInput.isVisible()) {
+                // If it's still not visible, it might be that the placeholder click didn't work.
+                // We'll try to focus it directly.
+                try {
+                    searchInput.focus(new Locator.FocusOptions().setTimeout(2000));
+                } catch (Exception e) {}
             }
 
-            // Find search bar, type the keyword and press Enter
-            Locator searchInput = page.locator("input[data-testid='suggestion']");
-            if (searchInput.count() == 0) {
-                 // Try alternative selector if they change classes
-                 searchInput = page.locator(".vQI670rJ"); // trendyol search input container
+            if (!searchInput.isVisible()) {
+                results.add("Error: Still could not see search input for " + keyword + " (possibly blocked by modal)");
+                context.close();
+                return results;
             }
 
             searchInput.fill(keyword);
@@ -141,6 +138,7 @@ public class TrendyolScraper {
             context.close();
         } catch (Exception e) {
             results.add("Error during scraping: " + e.getMessage());
+            e.printStackTrace();
         }
 
         return results;
