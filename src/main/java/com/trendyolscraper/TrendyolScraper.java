@@ -101,7 +101,7 @@ public class TrendyolScraper {
             }
 
             // Fill actual search bar
-            Locator searchInput = page.locator("input[data-testid='suggestion'], input.search-input");
+            Locator searchInput = page.locator("input[data-testid='suggestion'], input.search-input, .ios-keyboard-proxy");
             
             // Try to interact naturally first
             try {
@@ -113,7 +113,7 @@ public class TrendyolScraper {
                 searchInput.type(keyword, new Locator.TypeOptions().setDelay(50));
             } catch (Exception e) {
                 // Fallback to direct focus and type
-                page.evaluate("selector => document.querySelector(selector)?.focus()", "input[data-testid='suggestion']");
+                page.evaluate("selector => document.querySelector(selector)?.focus()", "input[data-testid='suggestion'], .ios-keyboard-proxy");
                 page.keyboard().type(keyword);
             }
 
