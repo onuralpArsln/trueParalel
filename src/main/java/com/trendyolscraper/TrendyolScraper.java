@@ -10,6 +10,7 @@ import java.util.Map;
 public class TrendyolScraper {
 
     private final Browser browser;
+    private static final Object contextLock = new Object();
 
     public TrendyolScraper(String mode, boolean gpuEnabled, Browser browser) {
         this.browser = browser;
@@ -18,38 +19,55 @@ public class TrendyolScraper {
     public List<String> searchAndExtract(String keyword, int x, int y, int z, int workerId) {
         List<String> results = new ArrayList<>();
 
-        // Create a new context and page from the shared browser
-        try (BrowserContext context = browser.newContext(new Browser.NewContextOptions()
-                    .setUserAgent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36")
-                    .setViewportSize(1920, 1080))) {
-            
-            // RADICAL MODAL KILLER: Injects a script to remove overlays and modals globally via CSS
-            context.addInitScript("() => {\n" +
-                "  const style = document.createElement('style');\n" +
-                "  style.innerHTML = `\n" +
-                "    .modal-container, .modal-close, #modals, \n" +
-                "    #onetrust-banner-sdk, .popup-container, .overlay, .overlay-container {\n" +
-                "      display: none !important; \n" +
-                "      visibility: hidden !important; \n" +
-                "      pointer-events: none !important;\n" +
-                "    }`;\n" +
-                "  document.head.appendChild(style);\n" +
-                "  \n" +
-                "  // Remove them from DOM every second just in case they are re-added\n" +
-                "  setInterval(() => {\n" +
-                "    ['.modal-container', '#modals', '#onetrust-banner-sdk'].forEach(sel => {\n" +
-                "       document.querySelectorAll(sel).forEach(el => el.remove());\n" +
-                "    });\n" +
-                "  }, 1000);\n" +
-                "}");
+        BrowserContext context = null;
+        Page page = null;
 
-            Page page = context.newPage();
+        try {
+            // Protected context creation to prevent macOS hangs while allowing parallel navigation later
+            synchronized (contextLock) {
+                context = browser.newContext(new Browser.NewContextOptions()
+                        .setUserAgent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36")
+                        .setViewportSize(1920, 1080));
+
+                // RADICAL MODAL KILLER: Injects a script to remove overlays and modals globally via CSS
+                context.addInitScript("() => {\n" +
+                    "  const style = document.createElement('style');\n" +
+                    "  style.innerHTML = `\n" +
+                    "    .modal-container, .modal-close, #modals, \n" +
+                    "    #onetrust-banner-sdk, .popup-container, .overlay, .overlay-container {\n" +
+                    "      display: none !important; \n" +
+                    "      visibility: hidden !important; \n" +
+                    "      pointer-events: none !important;\n" +
+                    "    }`;\n" +
+                    "  document.head.appendChild(style);\n" +
+                    "  \n" +
+                    "  // Remove them from DOM every second just in case they are re-added\n" +
+                    "  setInterval(() => {\n" +
+                    "    ['.modal-container', '#modals', '#onetrust-banner-sdk'].forEach(sel => {\n" +
+                    "       document.querySelectorAll(sel).forEach(el => el.remove());\n" +
+                    "    });\n" +
+                    "  }, 1000);\n" +
+                    "}");
+
+                page = context.newPage();
+            }
 
             // Set a generous timeout
             page.setDefaultTimeout(30000);
 
             // Navigate to trendyol
             page.navigate("https://www.trendyol.com/");
+
+            // 0. Country Selection Gatekeeper (New)
+            if (page.url().contains("/select-country")) {
+                try {
+                    Locator trOption = page.locator("div:has-text('Türkiye'), .country-item:has-text('Türkiye')");
+                    if (trOption.count() > 0) {
+                        trOption.first().click();
+                        page.waitForURL("https://www.trendyol.com/", new Page.WaitForURLOptions().setTimeout(10000));
+                    }
+                } catch (Exception e) {}
+            }
 
             // Wait for initial load and popups
             page.waitForTimeout(4000);
@@ -72,18 +90,18 @@ public class TrendyolScraper {
                     }
                 } catch (Exception e) {}
 
-                // 2. Cookie Consent Banner
+                // 2. Cookie Consent Banner (Expanded selectors)
                 try {
-                    Locator acceptCookies = page.locator("#onetrust-accept-btn-handler");
-                    if (acceptCookies.isVisible()) {
-                        acceptCookies.click();
+                    Locator acceptCookies = page.locator("#onetrust-accept-btn-handler, .cookie-policy-accept-button, .policy-accept-button");
+                    if (acceptCookies.count() > 0 && acceptCookies.first().isVisible()) {
+                        acceptCookies.first().click();
                         page.waitForTimeout(500);
                     }
                 } catch (Exception e) {}
                 
                 // 3. Campaign/Welcome popups
                 try {
-                    Locator campaignClose = page.locator(".campaign-button-close, .popup-close");
+                    Locator campaignClose = page.locator(".campaign-button-close, .popup-close, [data-testid='modal-close']");
                     if (campaignClose.count() > 0 && campaignClose.first().isVisible()) {
                         campaignClose.first().click();
                         page.waitForTimeout(500);
@@ -164,10 +182,10 @@ public class TrendyolScraper {
                 results.add("Error: Not enough products found. Needed up to " + (maxRequiredIndex + 1) + " but found " + count);
             }
 
-            context.close();
-        } catch (Exception e) {
-            results.add("Error during scraping: " + e.getMessage());
-            e.printStackTrace();
+        } finally {
+            if (context != null) {
+                context.close();
+            }
         }
 
         return results;

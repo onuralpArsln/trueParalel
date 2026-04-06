@@ -62,7 +62,16 @@ public class MainController {
             try (Browser browser = playwright.chromium().launch(launchOptions)) {
                 
                 // Final stability check - wait for browser connection to settle
-                Thread.sleep(2000); 
+                Thread.sleep(4000); 
+
+                // Shutdown hook to ensure browser is closed even on Ctrl+C or crash
+                final Browser finalBrowser = browser;
+                Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+                    try {
+                        System.out.println("[Shutdown Hook] Closing browser...");
+                        finalBrowser.close();
+                    } catch (Exception e) {}
+                }));
 
                 // Set up the Thread Pool
                 ExecutorService executorService = Executors.newFixedThreadPool(numberOfWorkers);

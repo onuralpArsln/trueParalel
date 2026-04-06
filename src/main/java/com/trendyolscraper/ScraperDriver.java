@@ -1,8 +1,5 @@
 package com.trendyolscraper;
 
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -12,7 +9,7 @@ import com.microsoft.playwright.Browser;
 
 public class ScraperDriver implements Runnable {
 
-    private static final Object contextLock = new Object();
+
     private final int workerId;
     private final String mode;
     private final boolean gpuEnabled;
@@ -62,10 +59,8 @@ public class ScraperDriver implements Runnable {
         System.out.println("[Worker " + workerId + "] Keyword: '" + keyword + "', fetching items at rank: " + x + ", " + y + ", " + z);
 
         List<String> results;
-        synchronized (contextLock) {
-            TrendyolScraper scraper = new TrendyolScraper(mode, gpuEnabled, browser);
-            results = scraper.searchAndExtract(keyword, x, y, z, workerId);
-        }
+        TrendyolScraper scraper = new TrendyolScraper(mode, gpuEnabled, browser);
+        results = scraper.searchAndExtract(keyword, x, y, z, workerId);
 
         if (Thread.currentThread().isInterrupted()) {
             System.out.println("[Worker " + workerId + "] Interrupted after scraping.");
