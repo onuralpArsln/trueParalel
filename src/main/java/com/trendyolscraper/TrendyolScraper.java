@@ -61,12 +61,15 @@ public class TrendyolScraper {
             // 0. Country Selection Gatekeeper (New)
             if (page.url().contains("/select-country")) {
                 try {
-                    Locator trOption = page.locator("div:has-text('Türkiye'), .country-item:has-text('Türkiye')");
+                    // Re-try with a broader text-based search for the Türkiye option
+                    Locator trOption = page.locator("div:has-text('Türkiye'), .country-item:has-text('Türkiye'), [data-testid='country-item-TR']");
                     if (trOption.count() > 0) {
                         trOption.first().click();
-                        page.waitForURL("https://www.trendyol.com/", new Page.WaitForURLOptions().setTimeout(10000));
+                        page.waitForURL("https://www.trendyol.com/", new Page.WaitForURLOptions().setTimeout(15000));
                     }
-                } catch (Exception e) {}
+                } catch (Exception e) {
+                   System.out.println("[Worker " + workerId + "] Could not bypass country gatekeeper: " + e.getMessage());
+                }
             }
 
             // Wait for initial load and popups
@@ -109,17 +112,19 @@ public class TrendyolScraper {
                 } catch (Exception e) {}
             }
 
-            // Click the search placeholder (if it exists)
-            Locator searchPlaceholder = page.locator(".suggestion-placeholder, button[data-testid='suggestion-placeholder']");
-            if (searchPlaceholder.isVisible()) {
-                try {
-                    searchPlaceholder.click(new Locator.ClickOptions().setForce(true).setTimeout(3000));
-                } catch (Exception e) {}
-                page.waitForTimeout(500);
+            // Click the search placeholder (CRITICAL for mobile view/PWA)
+            Locator searchPlaceholder = page.locator("button.suggestion-placeholder, .suggestion-placeholder, button[data-testid='suggestion-placeholder']");
+            try {
+                if (searchPlaceholder.isVisible() || searchPlaceholder.count() > 0) {
+                    searchPlaceholder.first().click(new Locator.ClickOptions().setForce(true).setTimeout(5000));
+                    page.waitForTimeout(1000);
+                }
+            } catch (Exception e) {
+                // Not always visible if already focused
             }
 
             // Fill actual search bar
-            Locator searchInput = page.locator("input[data-testid='suggestion'], input.search-input, .ios-keyboard-proxy");
+            Locator searchInput = page.locator("input.search-input, input[data-testid='suggestion'], .ios-keyboard-proxy");
             
             // Try to interact naturally first
             try {
@@ -146,12 +151,12 @@ public class TrendyolScraper {
                 page.waitForTimeout(2000);
             }
 
-            // Wait for results to load by waiting for product containers
+            // Wait for results to load by waiting for product cards
             try {
-                page.waitForSelector(".prdct-cntnr-wrppr", new Page.WaitForSelectorOptions().setTimeout(10000));
+                // Using .product-card as it is more stable than .prdct-cntnr-wrppr
+                page.waitForSelector(".product-card, .prdct-cntnr-wrppr, .p-card-wrppr", new Page.WaitForSelectorOptions().setTimeout(15000));
             } catch (Exception e) {
-                results.add("Error: Could not find product container after search for " + keyword);
-                context.close();
+                results.add("Error: Could not find product container/cards after search for " + keyword);
                 return results;
             }
 
